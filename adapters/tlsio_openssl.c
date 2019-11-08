@@ -1095,7 +1095,7 @@ static int load_cert_crl_memory(X509 *cert, X509_CRL **pCrl)
         }
 
 #if USE_OPENSSL_1_1_0_OR_UP
-        X509_CRL_up_ref(crl);
+        crl = X509_CRL_dup(crl);
 #else
         crl->references++;
 #endif
@@ -1122,7 +1122,7 @@ static int save_cert_crl_memory(X509 *cert, X509_CRL *crlp)
     if (crlp)
     {
 #if USE_OPENSSL_1_1_0_OR_UP
-        X509_CRL_up_ref(crlp);
+        crlp = X509_CRL_dup(crlp);
 #else
         crlp->references++;
 #endif
@@ -1146,6 +1146,7 @@ static int save_cert_crl_memory(X509 *cert, X509_CRL *crlp)
 
         if (0 == X509_NAME_cmp(issuer_crl, issuer_cert))
         {
+            crl_cache[n] = NULL;
             X509_CRL_free(crl);
 
             crl_cache[n] = crlp;
@@ -1188,6 +1189,7 @@ static int save_cert_crl_memory(X509 *cert, X509_CRL *crlp)
     new_crl_cache = (X509_CRL**)malloc((crl_cache_size + 10) * sizeof(X509_CRL*));
     if (!new_crl_cache)
     {
+        X509_CRL_free(crlp);
         lockResult = Unlock(crl_cache_lock);
         return 0;
     }
@@ -1430,6 +1432,16 @@ static int load_cert_crl_file(X509 *cert, const char* suffix, X509_CRL **pCrl)
         return 0;
     }
 
+    if (strlen(prefix) > 230)
+    {
+        if (!logCacheUsage)
+        {
+            LogInfo("Not using CRL cache directory (temp path too long).\n");
+        }
+        logCacheUsage = true;
+        return 0;
+    }
+
     // we need the issuer hash to find the file on disk
     X509_NAME *issuer_cert = cert ? X509_get_issuer_name(cert) : NULL;
     unsigned long hash = issuer_cert ? X509_NAME_hash(issuer_cert) : 0;
@@ -1477,6 +1489,11 @@ static int save_cert_crl_file(X509 *cert, const char* suffix, X509_CRL *crl)
     if (NULL == (prefix = getenv("TMP")) &&
         NULL == (prefix = getenv("TEMP")) &&
         NULL == (prefix = getenv("TMPDIR")))
+    {
+        return 0;
+    }
+
+    if (strlen(prefix) > 230)
     {
         return 0;
     }
